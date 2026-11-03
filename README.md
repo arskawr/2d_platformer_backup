@@ -13,7 +13,7 @@
 
 ### 1. Инициализация проекта и настройки сборки
 Проект создан в Unity Hub на базе официального шаблона **2D Platformer Microgame**.
-![Создание проекта](screenshots/lab1_1.png)
+Создание проекта (screenshots/lab1_1.png)
 
 Игровая логика шаблона изучена. Основная сцена игры расположена в папке `Assets/Scenes` и добавлена в список сцен сборки (Build Settings), так как именно этот список читает скрипт сборки через API `EditorBuildSettings.scenes`.
 ![Сцена в Unity](screenshots/lab1_2.png)
