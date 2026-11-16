@@ -30,8 +30,8 @@ public class TokenCollectionTests
         };
 
         // 4. Проверяем, что событие успешно создано и содержит правильные ссылки
-       // Assert.IsNotNull(collisionEvent, "Ошибка: Событие PlayerTokenCollision не создано!");
-       Assert.IsNull(collisionEvent, "СЛОМАННЫЙ ТЕСТ");
+       Assert.IsNotNull(collisionEvent, "Ошибка: Событие PlayerTokenCollision не создано!");
+        //Assert.IsNull(collisionEvent, "СЛОМАННЫЙ ТЕСТ");
         Assert.AreEqual(token, collisionEvent.token, "Ошибка: Токен не привязан к событию!");
         Assert.AreEqual(player, collisionEvent.player, "Ошибка: Игрок не привязан к событию!");
 
