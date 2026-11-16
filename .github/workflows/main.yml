@@ -8,51 +8,81 @@ jobs:
   sanity_check:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
+      - uses: actions/checkout@v4
       - name: Check Unity Directories
         run: |
-          echo "=== Проверка наличия метаданных Unity ==="
-          if [ -d "ProjectSettings" ]; then echo "ProjectSettings найден."; else echo "Ошибка!" && exit 1; fi
-          if [ -d "Packages" ]; then echo "Packages найден."; else echo "Ошибка!" && exit 1; fi
+          if [ -d "ProjectSettings" ]; then echo "OK"; else exit 1; fi
+          if [ -d "Packages" ]; then echo "OK"; else exit 1; fi
 
-      - name: Locate 2D Platformer Scripts
-        run: |
-          echo "=== Поиск C# скриптов в папке Assets ==="
-          find Assets/ -name "*Controller.cs" -print
-          find Assets/ -name "BuildManager.cs" -print
-
-  mirror_repo:
+  # ЭТАП 2 (ЛР №4): Автоматический запуск тестов Unity
+  run_tests:
     needs: sanity_check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - uses: actions/cache@v4
+        with:
+          path: Library
+          key: Library-${{ hashFiles('Packages/packages-lock.json', 'Assets/**/*.asmdef') }}
+
+      - name: Install GameCI CLI
+        run: |
+          curl -sL -o game-ci.tar.gz https://github.com/game-ci/cli/releases/download/v0.1.72/game-ci-linux-x64.tar.gz
+          tar xzf game-ci.tar.gz ./game-ci
+          echo "$PWD" >> $GITHUB_PATH
+
+      - name: Run Unity Tests
+        run: |
+          game-ci test --docker --dockerShmSize=1025m \
+          --engine=unity \
+          --testPlatforms='playmode;editmode;COMBINE_RESULTS' \
+          --engineVersion=6000.2.12f1 --coverageEnabled=false \
+          --artifactsPath=artifacts \
+          --dockerIsolationMode=default \
+          --containerRegistryRepository=unityci/editor \
+          --containerRegistryImageVersion=3
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+
+      - name: Upload test artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: artifacts/
+
+  # Зеркалирование теперь ждет тесты!
+  mirror_repo:
+    needs: run_tests
     if: github.repository == 'arskawr/ARPO1' 
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout full history
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: false
-
-      - name: Push to Backup Repository
+      - name: Push to Backup
         env:
           BACKUP_TOKEN: ${{ secrets.BACKUP_TOKEN }}
         run: |
-          echo "=== Начало процесса зеркалирования ==="
           git push --force https://x-access-token:${{ secrets.BACKUP_TOKEN }}@github.com/arskawr/2d_platformer_backup.git main
 
-  # НОВАЯ ЗАДАЧА 3: Сборка Docker-образа и публикация в GHCR
+  # Docker теперь тоже ждет тесты!
   docker_publish:
-    needs: sanity_check
+    needs: run_tests
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        
-      - name: Создание временных файлов-заглушек .gz для сборки образа
+      - uses: actions/checkout@v4
+      - name: Создание временных файлов-заглушек .gz
         run: |
           mkdir -p Builds/WebGL/Build Builds/WebGL/TemplateData
           touch Builds/WebGL/index.html
@@ -60,15 +90,13 @@ jobs:
           touch Builds/WebGL/Build/WebGL.framework.js.gz
           touch Builds/WebGL/Build/WebGL.wasm.gz
           touch Builds/WebGL/Build/WebGL.data.gz
-
-      - name: Вход в GitHub Container Registry (GHCR)
+      - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Сборка и публикация образа в GHCR
+      - name: Build and Push
         uses: docker/build-push-action@v5
         with:
           context: .
