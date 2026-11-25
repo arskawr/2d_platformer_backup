@@ -14,27 +14,21 @@ jobs:
           if [ -d "ProjectSettings" ]; then echo "OK"; else exit 1; fi
           if [ -d "Packages" ]; then echo "OK"; else exit 1; fi
 
-  # ЭТАП 2 (ЛР №4): Автоматический запуск тестов Unity
   run_tests:
     needs: sanity_check
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          lfs: true
-
+      - uses: actions/checkout@v4
+        with: { lfs: true }
       - uses: actions/cache@v4
         with:
           path: Library
           key: Library-${{ hashFiles('Packages/packages-lock.json', 'Assets/**/*.asmdef') }}
-
       - name: Install GameCI CLI
         run: |
           curl -sL -o game-ci.tar.gz https://github.com/game-ci/cli/releases/download/v0.1.72/game-ci-linux-x64.tar.gz
           tar xzf game-ci.tar.gz ./game-ci
           echo "$PWD" >> $GITHUB_PATH
-
       - name: Run Unity Tests
         run: |
           game-ci test --docker --dockerShmSize=1025m \
@@ -49,7 +43,6 @@ jobs:
           UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
           UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
-
       - name: Upload test artifacts
         uses: actions/upload-artifact@v4
         if: always()
@@ -57,7 +50,35 @@ jobs:
           name: test-results
           path: artifacts/
 
-  # Зеркалирование теперь ждет тесты!
+  # НОВЫЙ ЭТАП (ЛР №5): Реальная компиляция игры в облаке
+  build_game:
+    needs: run_tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { lfs: true }
+      - uses: actions/cache@v4
+        with:
+          path: Library
+          key: Library-Build-${{ hashFiles('Packages/packages-lock.json', 'Assets/**/*.asmdef') }}
+      
+      - name: Build WebGL Player
+        uses: game-ci/unity-builder@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          targetPlatform: WebGL
+          buildMethod: BuildManager.BuildWebGL
+          unityVersion: 6000.2.12f1
+          
+      - name: Upload WebGL Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WebGL-Build
+          path: Builds/WebGL
+
   mirror_repo:
     needs: run_tests
     if: github.repository == 'arskawr/ARPO1' 
@@ -73,32 +94,56 @@ jobs:
         run: |
           git push --force https://x-access-token:${{ secrets.BACKUP_TOKEN }}@github.com/arskawr/2d_platformer_backup.git main
 
-  # Docker теперь тоже ждет тесты!
-  docker_publish:
-    needs: run_tests
+  # НОВЫЙ ЭТАП 4 (ЛР №5): Docker с РЕАЛЬНОЙ игрой (без заглушек)
+  build_docker_image:
+    needs: build_game
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
     steps:
       - uses: actions/checkout@v4
-      - name: Создание временных файлов-заглушек .gz
-        run: |
-          mkdir -p Builds/WebGL/Build Builds/WebGL/TemplateData
-          touch Builds/WebGL/index.html
-          touch Builds/WebGL/Build/WebGL.loader.js
-          touch Builds/WebGL/Build/WebGL.framework.js.gz
-          touch Builds/WebGL/Build/WebGL.wasm.gz
-          touch Builds/WebGL/Build/WebGL.data.gz
+      
+      # Вместо создания заглушек через touch, скачиваем реальный билд!
+      - name: Download WebGL Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: WebGL-Build
+          path: Builds/WebGL
+          
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build and Push
+          
+      - name: Build and Push Docker Image
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
-          tags: ghcr.io/arskawr/arpo1:${{ github.sha }}
+          tags: |
+            ghcr.io/arskawr/arpo1:latest
+            ghcr.io/arskawr/arpo1:${{ github.sha }}
+
+  # НОВЫЙ ЭТАП 5 (ЛР №5): Автоматический деплой на GitHub Pages
+  deploy_to_pages:
+    needs: build_game
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Download WebGL Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: WebGL-Build
+          path: Builds/WebGL
+          
+      - name: Deploy to GitHub Pages
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          folder: Builds/WebGL
+          branch: gh-pages
