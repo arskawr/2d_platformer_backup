@@ -137,7 +137,7 @@ jobs:
           folder: Builds/WebGL
           branch: gh-pages
 
-  # НОВЫЙ ЭТАП (ЛР №6): Telegram-оповещения
+  # Telegram-оповещения
   notify:
     needs: [ sanity_check, run_tests, build_game, mirror_repo, build_docker_image, deploy_to_pages ]
     if: always() # Запускается в любом случае, даже если предыдущие задачи упали
